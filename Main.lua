@@ -110,6 +110,25 @@ local function HandleAim()
     end
 end
 
+local function DrawFovCircle()
+    if dhlock.showfov then
+        if not fovCircle then
+            fovCircle = Drawing.new("Circle")
+            fovCircle.Radius = dhlock.fov
+            fovCircle.Position = UserInputService:GetMouseLocation()
+            fovCircle.Color = dhlock.fovcolorunlocked
+            fovCircle.Thickness = 2
+            fovCircle.Transparency = dhlock.fovtransparency
+        end
+        fovCircle.Position = UserInputService:GetMouseLocation()
+        fovCircle.Radius = dhlock.fov
+        fovCircle.Color = dhlock.fovcolorunlocked
+    elseif fovCircle then
+        fovCircle:Remove()
+        fovCircle = nil
+    end
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
@@ -129,4 +148,5 @@ end)
 
 RunService.RenderStepped:Connect(function()
     HandleAim()
+    DrawFovCircle()
 end)

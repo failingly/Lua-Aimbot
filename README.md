@@ -16,7 +16,7 @@ getgenv().dhlock = {
     wallcheck = false, -- Checks for walls
     alivecheck = false, -- Enable/disable alive check
     lockpart = "Head", -- Part to lock onto when on the ground
-    lockpartair = "HumanoidRootPart", -- Part to lock onto when in the air
+    lockpartair = "Head", -- Part to lock onto when in the air
     smoothness = 1, -- Smoothness factor (higher = slower)
     predictionX = 0, -- Prediction multiplier for X-axis (horizontal)
     predictionY = 0, -- Prediction multiplier for Y-axis (vertical)

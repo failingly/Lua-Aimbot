@@ -28,7 +28,8 @@ local isAiming = false
 local fovCircle
 local lockedPlayer = nil
 local holdingKeybind = false
-local lastLockedPosition = nil
+
+local PREDICTION_MULTIPLIER = 0.0400
 
 local function IsValidKeybind(input)
     return typeof(input) == "EnumItem" and (input.EnumType == Enum.KeyCode or input.EnumType == Enum.UserInputType)
@@ -88,7 +89,11 @@ local function SmoothAimAtPlayer(player)
     if not part then return end
 
     local camera = Workspace.CurrentCamera
-    local targetPosition = part.Position + part.Velocity * Vector3.new(dhlock.predictionX, dhlock.predictionY, dhlock.predictionX)
+    local targetPosition = part.Position + part.Velocity * Vector3.new(
+        dhlock.predictionX * PREDICTION_MULTIPLIER,
+        dhlock.predictionY * PREDICTION_MULTIPLIER,
+        dhlock.predictionX * PREDICTION_MULTIPLIER
+    )
     local targetCFrame = CFrame.new(camera.CFrame.Position, targetPosition)
     local smoothnessFactor = 1 / math.max(dhlock.smoothness, 1e-5)
 

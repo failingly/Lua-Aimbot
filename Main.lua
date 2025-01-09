@@ -7,7 +7,7 @@ getgenv().dhlock = {
     wallcheck = false,
     alivecheck = false,
     lockpart = "Head",
-    lockpartair = "HumanoidRootPart",
+    lockpartair = "Head",
     smoothness = 1,
     predictionX = 0,
     predictionY = 0,
@@ -88,7 +88,8 @@ local function SmoothAimAtPlayer(player)
     if not part then return end
 
     local camera = Workspace.CurrentCamera
-    local targetCFrame = CFrame.lookAt(camera.CFrame.Position, part.Position)
+    local targetPosition = part.Position + part.Velocity * Vector3.new(dhlock.predictionX, dhlock.predictionY, dhlock.predictionX)
+    local targetCFrame = CFrame.new(camera.CFrame.Position, targetPosition)
     local smoothnessFactor = 1 / math.max(dhlock.smoothness, 1e-5)
 
     camera.CFrame = camera.CFrame:Lerp(targetCFrame, smoothnessFactor)

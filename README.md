@@ -1,3 +1,5 @@
+## Feel free to use this in a script.
+
 ## Load the Aimbot
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()

@@ -562,9 +562,9 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Clean up resources when script is unloaded
+-- Create a clean-up connection that can be called when the script is unloaded
 local scriptDestructor = Instance.new("BindableEvent")
 scriptDestructor.Event:Connect(CleanupResources)
 
--- Return destructor to allow proper cleanup
+-- Return the destructor so it can be triggered externally
 return scriptDestructor

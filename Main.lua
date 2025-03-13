@@ -1,22 +1,44 @@
 -- Configuration settings for the aimbot
 getgenv().dhlock = {
+    -- Core settings
     enabled = false,              -- Master toggle for the entire aimbot functionality
-    showfov = false,              -- Whether to show the FOV circle on screen
+    smoothness = 1,               -- How smooth the aim is (higher = slower)
+    
+    -- Silent aim settings
+    silent = {
+        enabled = false,          -- Toggle for silent aim functionality
+        hitchance = 100,          -- Chance of hit in percentage (0-100)
+        methodPriority = {        -- Priority list of methods to try (1 = highest priority)
+            raycast = 1,          -- Raycast method
+            findpart = 2,         -- FindPartOnRay methods
+            mousehit = 3          -- Mouse.Hit/Target method
+        }
+    },
+    
+    -- Targeting settings
     fov = 50,                     -- Size of the FOV circle in pixels
-    keybind = Enum.UserInputType.MouseButton2, -- Key to activate the aimbot (right mouse button)
     teamcheck = false,            -- Whether to ignore players on your team
-    wallcheck = false,            -- Whether to check if there's a wall between you and target (currently unused)
+    wallcheck = false,            -- Whether to check if there's a wall between you and target
     alivecheck = false,           -- Whether to check if target is alive
     lockpart = "Head",            -- Body part to target when on ground
     lockpartair = "Head",         -- Body part to target when in air
-    smoothness = 1,               -- How smooth the aim is (higher = slower)
     predictionX = 0,              -- Horizontal movement prediction
     predictionY = 0,              -- Vertical movement prediction
-    fovcolorlocked = Color3.new(1, 0, 0),   -- FOV circle color when locked onto a target (red)
-    fovcolorunlocked = Color3.new(0, 0, 0), -- FOV circle color when not locked (black)
-    fovtransparency = 0.6,        -- Transparency of the FOV circle (0-1)
+    
+    -- Controls
+    keybind = Enum.UserInputType.MouseButton1, -- Key to activate the aimbot (right mouse button)
     toggle = false,               -- Whether aimbot stays on after releasing key
-    blacklist = {}                -- List of player names to ignore
+    alwayson = false,             -- Always on aimbot regardless of keybind
+    
+    -- Visualization
+    showfov = false,              -- Whether to show the FOV circle on screen
+    fovcolorlocked = Color3.new(1, 0, 0),   -- FOV circle color when locked onto a target (red)
+    fovcolorunlocked = Color3.new(1, 1, 1), -- FOV circle color when not locked (white)
+    fovtransparency = 0.6,        -- Transparency of the FOV circle (0-1)
+    shadowenabled = true,         -- Enable shadow behind FOV circle
+    shadowcolor = Color3.new(0, 0, 0), -- Shadow color (black)
+    shadowtransparency = 0.3,     -- Shadow transparency
+    shadowsize = 2                -- Shadow size in pixels
 }
 
 -- Get necessary game services
@@ -28,8 +50,10 @@ local Camera = Workspace.CurrentCamera
 
 -- Local variables
 local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
 local isAiming = false           -- Whether aimbot is currently active
 local fovCircle                  -- Drawing object for FOV circle
+local fovShadow                  -- Drawing object for FOV shadow
 local lockedPlayer = nil         -- Currently targeted player
 local holdingKeybind = false     -- Whether the keybind is currently held
 
@@ -97,8 +121,8 @@ local function GetClosestPlayer()
     mousePosition = UserInputService:GetMouseLocation()
 
     for _, player in pairs(Players:GetPlayers()) do
-        -- Skip if player is self or in blacklist
-        if player == LocalPlayer or table.find(dhlock.blacklist, player.Name) then
+        -- Skip if player is self
+        if player == LocalPlayer then
             continue
         end
         
@@ -127,10 +151,10 @@ local function GetClosestPlayer()
         
         -- Check if closer than current closest and within FOV
         if distance < shortestDistance then
-            -- Wall check (commented out to optimize - enable if needed)
-            -- if dhlock.wallcheck and IsWallBetween(part.Position) then
-            --     continue
-            -- end
+            -- Wall check
+            if dhlock.wallcheck and IsWallBetween(part.Position) then
+                continue
+            end
             
             closestPlayer = player
             shortestDistance = distance
@@ -169,7 +193,10 @@ end
 local function HandleAim()
     if not dhlock.enabled then return end
 
-    if holdingKeybind or (dhlock.toggle and isAiming) then
+    -- Check if aimbot should be active
+    local shouldAim = dhlock.alwayson or holdingKeybind or (dhlock.toggle and isAiming)
+    
+    if shouldAim then
         -- Only search for a new target if we don't have one or if current is invalid
         if not lockedPlayer or 
            not lockedPlayer.Character or 
@@ -197,11 +224,30 @@ local function HandleAim()
     end
 end
 
--- Creates or updates the FOV circle visualization
+-- Creates or updates the FOV circle visualization and shadow
 local function UpdateFovCircle()
     mousePosition = UserInputService:GetMouseLocation()
     
     if dhlock.showfov then
+        -- Create or update shadow
+        if dhlock.shadowenabled then
+            if not fovShadow then
+                fovShadow = Drawing.new("Circle")
+                fovShadow.Filled = false
+                fovShadow.Thickness = 2 + dhlock.shadowsize
+                fovShadow.NumSides = 60
+            end
+            
+            fovShadow.Visible = true
+            fovShadow.Position = mousePosition
+            fovShadow.Radius = dhlock.fov
+            fovShadow.Color = dhlock.shadowcolor
+            fovShadow.Transparency = dhlock.shadowtransparency
+        elseif fovShadow then
+            fovShadow.Visible = false
+        end
+        
+        -- Create or update main FOV circle
         if not fovCircle then
             -- Create new FOV circle if it doesn't exist
             fovCircle = Drawing.new("Circle")
@@ -216,11 +262,196 @@ local function UpdateFovCircle()
         fovCircle.Radius = dhlock.fov
         fovCircle.Color = lockedPlayer and dhlock.fovcolorlocked or dhlock.fovcolorunlocked
         fovCircle.Transparency = dhlock.fovtransparency
-    elseif fovCircle then
-        -- Hide circle if showfov is disabled
-        fovCircle.Visible = false
+    else
+        -- Hide circles if showfov is disabled
+        if fovCircle then
+            fovCircle.Visible = false
+        end
+        if fovShadow then
+            fovShadow.Visible = false
+        end
     end
 end
+
+-- Get predicted target position
+local function GetPredictedTargetPosition()
+    if not lockedPlayer or not lockedPlayer.Character then return nil end
+    
+    local targetPart = lockedPlayer.Character:FindFirstChild(GetCurrentLockPart())
+    if not targetPart then return nil end
+    
+    -- Calculate predicted position based on velocity
+    local targetPosition = targetPart.Position
+    if targetPart:IsA("BasePart") then
+        targetPosition = targetPosition + targetPart.Velocity * Vector3.new(
+            dhlock.predictionX * PREDICTION_MULTIPLIER,
+            dhlock.predictionY * PREDICTION_MULTIPLIER,
+            dhlock.predictionX * PREDICTION_MULTIPLIER
+        )
+    end
+    
+    return targetPosition
+end
+
+-- Modified ray creation for silent aim
+local function CreateModifiedRay()
+    local startPos = Camera.CFrame.Position
+    local targetPos = GetPredictedTargetPosition()
+    
+    if not targetPos then return nil end
+    
+    local direction = (targetPos - startPos).Unit
+    local ray = Ray.new(startPos, direction * 1000)
+    
+    return ray, startPos, startPos + direction * 1000
+end
+
+-- Handle the Raycast method for silent aim
+local function HandleRaycast(self, args)
+    local origin = args[2]
+    local direction
+    
+    if typeof(args[3]) == "Vector3" then
+        direction = args[3]
+    else
+        direction = (args[3] - origin).Unit * 1000
+    end
+    
+    local raycastParams
+    if typeof(args[4]) == "RaycastParams" then
+        raycastParams = args[4]
+    else
+        raycastParams = RaycastParams.new()
+        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    end
+    
+    local targetPos = GetPredictedTargetPosition()
+    if not targetPos then return false end
+    
+    -- Modify direction to point to target
+    local newDirection = (targetPos - origin).Unit * 1000
+    args[3] = newDirection
+    
+    return true
+end
+
+-- Handle the FindPartOnRay methods for silent aim
+local function HandleFindPartOnRay(self, method, args)
+    local ray = args[2]
+    local ignoreList, whitelist
+    local originParam = 3
+    
+    if method == "FindPartOnRayWithIgnoreList" then
+        ignoreList = args[originParam]
+        -- Ensure local player character is in ignore list
+        if typeof(ignoreList) == "table" then
+            local hasCharacter = false
+            for _, v in pairs(ignoreList) do
+                if v == LocalPlayer.Character then
+                    hasCharacter = true
+                    break
+                end
+            end
+            if not hasCharacter and LocalPlayer.Character then
+                table.insert(ignoreList, LocalPlayer.Character)
+            end
+        end
+    elseif method == "FindPartOnRayWithWhitelist" then
+        whitelist = args[originParam]
+        -- If target character is not in whitelist, add relevant parts
+        if typeof(whitelist) == "table" and lockedPlayer and lockedPlayer.Character then
+            local targetPart = lockedPlayer.Character:FindFirstChild(GetCurrentLockPart())
+            if targetPart then
+                table.insert(whitelist, targetPart)
+            end
+        end
+    end
+    
+    local newRay, origin, endPos = CreateModifiedRay()
+    if not newRay then return false end
+    
+    args[2] = newRay
+    
+    return true
+}
+
+-- Handle Mouse.Hit/Target method for silent aim
+local function HandleMouseTarget()
+    if not Mouse then return end
+    
+    local targetPos = GetPredictedTargetPosition()
+    if not targetPos then return end
+    
+    -- This will be used by hooking Mouse.Hit and Mouse.Target properties
+    local startPos = Camera.CFrame.Position
+    local direction = (targetPos - startPos).Unit
+    
+    -- Create a CFrame for the modified hit point
+    return CFrame.new(targetPos, targetPos + direction)
+end
+
+-- Silent aim implementation with multiple methods
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+    
+    -- Only intercept if silent aim is enabled and we have valid conditions
+    if dhlock.enabled and dhlock.silent.enabled and 
+       lockedPlayer and lockedPlayer.Character and 
+       math.random(1, 100) <= dhlock.silent.hitchance then
+        
+        -- Try methods based on priority
+        local priorities = dhlock.silent.methodPriority
+        local modified = false
+        
+        -- Raycast method
+        if method == "Raycast" and priorities.raycast then
+            modified = HandleRaycast(self, args)
+        -- FindPartOnRay methods
+        elseif (method == "FindPartOnRay" or 
+                method == "FindPartOnRayWithIgnoreList" or 
+                method == "FindPartOnRayWithWhitelist") and priorities.findpart then
+            modified = HandleFindPartOnRay(self, method, args)
+        end
+        
+        if modified then
+            return oldNamecall(self, unpack(args))
+        end
+    end
+    
+    return oldNamecall(self, ...)
+end)
+
+-- Hook Mouse properties for silent aim
+local oldIndex = nil
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if dhlock.enabled and dhlock.silent.enabled and 
+       lockedPlayer and lockedPlayer.Character and
+       math.random(1, 100) <= dhlock.silent.hitchance and
+       dhlock.silent.methodPriority.mousehit and
+       (self == Mouse and (key == "Hit" or key == "Target")) then
+        
+        local hitCFrame = HandleMouseTarget()
+        if hitCFrame then
+            if key == "Hit" then
+                return hitCFrame
+            else
+                -- For Target, we need to find the actual part at the hit position
+                local targetPos = hitCFrame.Position
+                local ray = Ray.new(Camera.CFrame.Position, (targetPos - Camera.CFrame.Position).Unit * 1000)
+                local part = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character}, false, true)
+                
+                if part then
+                    return part
+                end
+            end
+        end
+    end
+    
+    return oldIndex(self, key)
+end)
 
 -- Handle keybind press
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -254,7 +485,7 @@ UserInputService.InputEnded:Connect(function(input)
         holdingKeybind = false
         
         -- If not in toggle mode, reset lock when key is released
-        if not dhlock.toggle then
+        if not dhlock.toggle and not dhlock.alwayson then
             lockedPlayer = nil
             
             -- Update FOV circle color
@@ -283,6 +514,10 @@ scriptDestructor.Event:Connect(function()
     if fovCircle then
         fovCircle:Remove()
         fovCircle = nil
+    end
+    if fovShadow then
+        fovShadow:Remove()
+        fovShadow = nil
     end
 end)
 

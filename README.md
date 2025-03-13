@@ -2,7 +2,7 @@
 
 ## Load the Aimbot
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()
+[loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()](https://raw.githubusercontent.com/Exunys/Aimbot-V3/main/src/Aimbot.lua)
 ```
 ## Customizable Settings for Aimbot
 ```lua
@@ -29,7 +29,7 @@ getgenv().dhlock = {
 > Disabled by default. Make sure to enable everything. Here's an example usage:
 > ## Example Usage
 > ```lua
->  loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()
+>  [loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()](https://raw.githubusercontent.com/Exunys/Aimbot-V3/main/src/Aimbot.lua)
 >  dhlock.fov = 80
 >  dhlock.keybind = Enum.Keycode.E
 >  dhlock.enabled = true

@@ -1,7 +1,4 @@
-# DH-Lua-Lock | Make sure to drop a ⭐ if you liked the script
-roblox lua lock (aimbot) designed for da hood, also works on games like hood customs.
-
-## Load the Lock
+## Load the Aimbot
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Stratxgy/DH-Lua-Lock/refs/heads/main/Main.lua"))()
 ```

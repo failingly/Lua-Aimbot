@@ -26,7 +26,7 @@ getgenv().dhlock = {
     predictionY = 0,              -- Vertical movement prediction
     
     -- Controls
-    keybind = Enum.UserInputType.MouseButton1, -- Key to activate the aimbot (right mouse button)
+    keybind = Enum.UserInputType.MouseButton1, -- Key to activate the aimbot (left mouse button)
     toggle = false,               -- Whether aimbot stays on after releasing key
     alwayson = false,             -- Always on aimbot regardless of keybind
     
@@ -64,6 +64,9 @@ local PREDICTION_MULTIPLIER = 0.0400  -- Base multiplier for movement prediction
 local mousePosition = Vector2.new()
 local lastUpdateTime = tick()
 local updateFrequency = 0.01     -- Update frequency limiter
+
+-- Namespace for original functions
+local OriginalFunctions = {}
 
 -- Checks if an input is a valid keybind type
 local function IsValidKeybind(input)
@@ -111,7 +114,7 @@ local function IsWallBetween(targetPosition)
         true
     )
     
-    return hit ~= nil
+    return hit ~= nil and hit:IsDescendantOf(targetPosition.Parent) == false
 end
 
 -- Gets the closest player to the mouse cursor within FOV
@@ -152,7 +155,7 @@ local function GetClosestPlayer()
         -- Check if closer than current closest and within FOV
         if distance < shortestDistance then
             -- Wall check
-            if dhlock.wallcheck and IsWallBetween(part.Position) then
+            if IsWallBetween(part) then
                 continue
             end
             
@@ -293,237 +296,216 @@ local function GetPredictedTargetPosition()
     return targetPosition
 end
 
--- Modified ray creation for silent aim
-local function CreateModifiedRay()
-    local startPos = Camera.CFrame.Position
+-- Silent aim handling
+local SilentAim = {}
+
+-- Should the silent aim be applied
+function SilentAim.ShouldApply()
+    return dhlock.enabled and 
+           dhlock.silent.enabled and 
+           lockedPlayer and 
+           lockedPlayer.Character and 
+           math.random(1, 100) <= dhlock.silent.hitchance
+end
+
+-- Create a modified ray for silent aim
+function SilentAim.CreateModifiedRay()
     local targetPos = GetPredictedTargetPosition()
-    
     if not targetPos then return nil end
     
+    local startPos = Camera.CFrame.Position
     local direction = (targetPos - startPos).Unit
-    local ray = Ray.new(startPos, direction * 1000)
     
-    return ray, startPos, startPos + direction * 1000
+    return Ray.new(startPos, direction * 1000), startPos, targetPos
 end
 
--- Handle the Raycast method for silent aim
-local function HandleRaycast(origin, direction, raycastParams)
-    local targetPos = GetPredictedTargetPosition()
-    if not targetPos then return direction end
-    
-    -- Ensure raycastParams exists
-    if not raycastParams then
-        raycastParams = RaycastParams.new()
-        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+-- Handle raycast method
+function SilentAim.ModifyRaycast(origin, direction, raycastParams)
+    if not SilentAim.ShouldApply() or dhlock.silent.methodPriority.raycast > 1 then
+        return origin, direction, raycastParams
     end
     
-    -- Modify direction to point to target
-    local newDirection = (targetPos - origin).Unit * 1000
-    return newDirection
+    local targetPos = GetPredictedTargetPosition()
+    if not targetPos then return origin, direction, raycastParams end
+    
+    local newDirection = (targetPos - origin).Unit * direction.Magnitude
+    return origin, newDirection, raycastParams
 end
 
--- Handle the FindPartOnRay methods for silent aim
-local function HandleFindPartOnRay(ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-    -- Ensure local player character is in ignore list
-    if typeof(ignoreList) == "table" then
-        local hasCharacter = false
-        for _, v in pairs(ignoreList) do
-            if v == LocalPlayer.Character then
-                hasCharacter = true
-                break
+-- Handle FindPartOnRay methods
+function SilentAim.ModifyRay(ray)
+    if not SilentAim.ShouldApply() or dhlock.silent.methodPriority.findpart > 1 then
+        return ray
+    end
+    
+    local newRay = SilentAim.CreateModifiedRay()
+    return newRay or ray
+end
+
+-- Safe function hooking
+local function HookFunction(target, functionName, hookFunction)
+    -- Store original function
+    local original = target[functionName]
+    OriginalFunctions[functionName] = original
+    
+    -- Create a safe hook
+    local success, err = pcall(function()
+        target[functionName] = hookFunction(original)
+    end)
+    
+    if not success then
+        warn("Failed to hook " .. functionName .. ": " .. tostring(err))
+        return false
+    end
+    
+    return true
+end
+
+-- Setup silent aim hooks
+local function SetupSilentAimHooks()
+    -- Raycast hook
+    HookFunction(Workspace, "Raycast", function(original)
+        return function(self, origin, direction, raycastParams, ...)
+            if self ~= Workspace then
+                return original(self, origin, direction, raycastParams, ...)
             end
-        end
-        if not hasCharacter and LocalPlayer.Character then
-            table.insert(ignoreList, LocalPlayer.Character)
-        end
-    end
-    
-    local newRay, origin, endPos = CreateModifiedRay()
-    if not newRay then return ray end
-    
-    return newRay
-end
-
--- Handle FindPartOnRayWithWhitelist for silent aim
-local function HandleFindPartOnRayWithWhitelist(ray, whitelist, ignoreWater)
-    -- If target character is not in whitelist, add relevant parts
-    if typeof(whitelist) == "table" and lockedPlayer and lockedPlayer.Character then
-        local targetPart = lockedPlayer.Character:FindFirstChild(GetCurrentLockPart())
-        if targetPart then
-            table.insert(whitelist, targetPart)
-        end
-    end
-    
-    local newRay, origin, endPos = CreateModifiedRay()
-    if not newRay then return ray end
-    
-    return newRay
-end
-
--- Handle Mouse.Hit/Target method for silent aim
-local function HandleMouseTarget()
-    if not Mouse then return nil end
-    
-    local targetPos = GetPredictedTargetPosition()
-    if not targetPos then return nil end
-    
-    -- This will be used by modifying Mouse.Hit and Mouse.Target properties
-    local startPos = Camera.CFrame.Position
-    local direction = (targetPos - startPos).Unit
-    
-    -- Create a CFrame for the modified hit point
-    return CFrame.new(targetPos, targetPos + direction)
-end
-
--- Original game functions that we're going to override
-local originalFunctions = {}
-
--- Function to set up our modified versions of game functions
-local function SetupFunctionOverrides()
-    -- Store original Workspace functions
-    originalFunctions.Raycast = Workspace.Raycast
-    originalFunctions.FindPartOnRay = Workspace.FindPartOnRay
-    originalFunctions.FindPartOnRayWithIgnoreList = Workspace.FindPartOnRayWithIgnoreList
-    originalFunctions.FindPartOnRayWithWhitelist = Workspace.FindPartOnRayWithWhitelist
-    
-    -- Override the Raycast method
-    Workspace.Raycast = function(self, origin, direction, raycastParams)
-        if self ~= Workspace then
-            return originalFunctions.Raycast(self, origin, direction, raycastParams)
-        end
-        
-        if dhlock.enabled and dhlock.silent.enabled and 
-           lockedPlayer and lockedPlayer.Character and 
-           math.random(1, 100) <= dhlock.silent.hitchance and
-           dhlock.silent.methodPriority.raycast then
             
-            local newDirection = HandleRaycast(origin, direction, raycastParams)
-            return originalFunctions.Raycast(self, origin, newDirection, raycastParams)
+            local newOrigin, newDirection, newParams = SilentAim.ModifyRaycast(origin, direction, raycastParams)
+            return original(self, newOrigin, newDirection, newParams, ...)
         end
-        
-        return originalFunctions.Raycast(self, origin, direction, raycastParams)
-    end
+    end)
     
-    -- Override the FindPartOnRay method
-    Workspace.FindPartOnRay = function(self, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-        if self ~= Workspace then
-            return originalFunctions.FindPartOnRay(self, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-        end
-        
-        if dhlock.enabled and dhlock.silent.enabled and 
-           lockedPlayer and lockedPlayer.Character and 
-           math.random(1, 100) <= dhlock.silent.hitchance and
-           dhlock.silent.methodPriority.findpart then
+    -- FindPartOnRay hook
+    HookFunction(Workspace, "FindPartOnRay", function(original)
+        return function(self, ray, ...)
+            if self ~= Workspace then
+                return original(self, ray, ...)
+            end
             
-            local ignoreList = ignoreDescendantsInstance and {ignoreDescendantsInstance} or {}
-            local newRay = HandleFindPartOnRay(ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-            return originalFunctions.FindPartOnRay(self, newRay, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
+            local newRay = SilentAim.ModifyRay(ray)
+            return original(self, newRay, ...)
         end
-        
-        return originalFunctions.FindPartOnRay(self, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-    end
+    end)
     
-    -- Override the FindPartOnRayWithIgnoreList method
-    Workspace.FindPartOnRayWithIgnoreList = function(self, ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-        if self ~= Workspace then
-            return originalFunctions.FindPartOnRayWithIgnoreList(self, ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-        end
-        
-        if dhlock.enabled and dhlock.silent.enabled and 
-           lockedPlayer and lockedPlayer.Character and 
-           math.random(1, 100) <= dhlock.silent.hitchance and
-           dhlock.silent.methodPriority.findpart then
+    -- FindPartOnRayWithIgnoreList hook
+    HookFunction(Workspace, "FindPartOnRayWithIgnoreList", function(original)
+        return function(self, ray, ignoreList, ...)
+            if self ~= Workspace then
+                return original(self, ray, ignoreList, ...)
+            end
             
-            local newRay = HandleFindPartOnRay(ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-            return originalFunctions.FindPartOnRayWithIgnoreList(self, newRay, ignoreList, terrainCellsAreCubes, ignoreWater)
-        end
-        
-        return originalFunctions.FindPartOnRayWithIgnoreList(self, ray, ignoreList, terrainCellsAreCubes, ignoreWater)
-    end
-    
-    -- Override the FindPartOnRayWithWhitelist method
-    Workspace.FindPartOnRayWithWhitelist = function(self, ray, whitelist, ignoreWater)
-        if self ~= Workspace then
-            return originalFunctions.FindPartOnRayWithWhitelist(self, ray, whitelist, ignoreWater)
-        end
-        
-        if dhlock.enabled and dhlock.silent.enabled and 
-           lockedPlayer and lockedPlayer.Character and 
-           math.random(1, 100) <= dhlock.silent.hitchance and
-           dhlock.silent.methodPriority.findpart then
-            
-            local newRay = HandleFindPartOnRayWithWhitelist(ray, whitelist, ignoreWater)
-            return originalFunctions.FindPartOnRayWithWhitelist(self, newRay, whitelist, ignoreWater)
-        end
-        
-        return originalFunctions.FindPartOnRayWithWhitelist(self, ray, whitelist, ignoreWater)
-    end
-    
-    -- Modify Mouse properties
-    local mouseMetatable = getmetatable(Mouse)
-    if mouseMetatable then
-        -- Store original __index function
-        originalFunctions.mouseIndex = mouseMetatable.__index
-        
-        -- Override __index to modify Mouse.Hit and Mouse.Target
-        mouseMetatable.__index = function(self, key)
-            if dhlock.enabled and dhlock.silent.enabled and 
-               lockedPlayer and lockedPlayer.Character and
-               math.random(1, 100) <= dhlock.silent.hitchance and
-               dhlock.silent.methodPriority.mousehit and
-               (key == "Hit" or key == "Target") then
-                
-                local hitCFrame = HandleMouseTarget()
-                if hitCFrame then
-                    if key == "Hit" then
-                        return hitCFrame
-                    else
-                        -- For Target, we need to find the actual part at the hit position
-                        local targetPos = hitCFrame.Position
-                        local ray = Ray.new(Camera.CFrame.Position, (targetPos - Camera.CFrame.Position).Unit * 1000)
-                        local part = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character}, false, true)
-                        
-                        if part then
-                            return part
-                        end
+            -- Ensure local player character is in ignore list
+            if typeof(ignoreList) == "table" and LocalPlayer.Character then
+                local hasCharacter = false
+                for _, v in pairs(ignoreList) do
+                    if v == LocalPlayer.Character then
+                        hasCharacter = true
+                        break
                     end
+                end
+                
+                if not hasCharacter then
+                    -- Create a new table to avoid modifying the original
+                    local newIgnoreList = table.clone(ignoreList)
+                    table.insert(newIgnoreList, LocalPlayer.Character)
+                    ignoreList = newIgnoreList
                 end
             end
             
-            return originalFunctions.mouseIndex(self, key)
+            local newRay = SilentAim.ModifyRay(ray)
+            return original(self, newRay, ignoreList, ...)
+        end
+    end)
+    
+    -- FindPartOnRayWithWhitelist hook
+    HookFunction(Workspace, "FindPartOnRayWithWhitelist", function(original)
+        return function(self, ray, whitelist, ...)
+            if self ~= Workspace then
+                return original(self, ray, whitelist, ...)
+            end
+            
+            local newRay = SilentAim.ModifyRay(ray)
+            return original(self, newRay, whitelist, ...)
+        end
+    end)
+    
+    -- Mouse properties hook using metatables - wrapped in pcall for safety
+    pcall(function()
+        local mouseMetatable = getmetatable(Mouse)
+        if mouseMetatable and mouseMetatable.__index then
+            -- Store original __index function
+            local originalIndex = mouseMetatable.__index
+            OriginalFunctions.mouseIndex = originalIndex
+            
+            -- Create a new __index function
+            mouseMetatable.__index = function(self, key)
+                if key == "Hit" or key == "Target" then
+                    if SilentAim.ShouldApply() and dhlock.silent.methodPriority.mousehit <= 1 then
+                        local targetPos = GetPredictedTargetPosition()
+                        if targetPos then
+                            if key == "Hit" then
+                                local direction = (targetPos - Camera.CFrame.Position).Unit
+                                return CFrame.new(targetPos, targetPos + direction)
+                            elseif key == "Target" then
+                                -- For Target property, we need to raycast to find the actual part
+                                local targetChar = lockedPlayer.Character
+                                local targetPart = targetChar and targetChar:FindFirstChild(GetCurrentLockPart())
+                                if targetPart then
+                                    return targetPart
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                return originalIndex(self, key)
+            end
+        end
+    end)
+end
+
+-- Function to restore original functions
+local function RestoreOriginalFunctions()
+    for name, func in pairs(OriginalFunctions) do
+        if name == "mouseIndex" then
+            -- Handle metatable restoration separately
+            pcall(function()
+                local mouseMetatable = getmetatable(Mouse)
+                if mouseMetatable then
+                    mouseMetatable.__index = func
+                end
+            end)
+        else
+            -- Restore workspace functions
+            Workspace[name] = func
         end
     end
+    
+    -- Clear the original functions table
+    OriginalFunctions = {}
 end
 
--- Function to restore original functions when script is unloaded
-local function RestoreOriginalFunctions()
-    -- Restore Workspace functions
-    if originalFunctions.Raycast then
-        Workspace.Raycast = originalFunctions.Raycast
+-- Clean up resources
+local function CleanupResources()
+    -- Clean up drawing objects
+    if fovCircle then
+        fovCircle:Remove()
+        fovCircle = nil
+    end
+    if fovShadow then
+        fovShadow:Remove()
+        fovShadow = nil
     end
     
-    if originalFunctions.FindPartOnRay then
-        Workspace.FindPartOnRay = originalFunctions.FindPartOnRay
-    end
-    
-    if originalFunctions.FindPartOnRayWithIgnoreList then
-        Workspace.FindPartOnRayWithIgnoreList = originalFunctions.FindPartOnRayWithIgnoreList
-    end
-    
-    if originalFunctions.FindPartOnRayWithWhitelist then
-        Workspace.FindPartOnRayWithWhitelist = originalFunctions.FindPartOnRayWithWhitelist
-    end
-    
-    -- Restore Mouse metatable
-    local mouseMetatable = getmetatable(Mouse)
-    if mouseMetatable and originalFunctions.mouseIndex then
-        mouseMetatable.__index = originalFunctions.mouseIndex
-    end
+    -- Restore original functions
+    RestoreOriginalFunctions()
 end
 
--- Set up our function overrides
-SetupFunctionOverrides()
+-- Set up our function overrides safely
+local hookSuccess = pcall(SetupSilentAimHooks)
+if not hookSuccess then
+    warn("Failed to set up silent aim hooks. Silent aim may not function correctly.")
+end
 
 -- Handle keybind press
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -582,20 +564,7 @@ end)
 
 -- Clean up resources when script is unloaded
 local scriptDestructor = Instance.new("BindableEvent")
-scriptDestructor.Event:Connect(function()
-    -- Clean up drawing objects
-    if fovCircle then
-        fovCircle:Remove()
-        fovCircle = nil
-    end
-    if fovShadow then
-        fovShadow:Remove()
-        fovShadow = nil
-    end
-    
-    -- Restore original functions
-    RestoreOriginalFunctions()
-end)
+scriptDestructor.Event:Connect(CleanupResources)
 
 -- Return destructor to allow proper cleanup
 return scriptDestructor

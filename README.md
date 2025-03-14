@@ -2,7 +2,7 @@
 
 ## Load the Aimbot
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/Aimbot-V3/main/src/Aimbot.lua"))()
+local Aimbot = loadstring(game:HttpGet("https://raw.githubusercontent.com/failingly/Lua-Aimbot/refs/heads/main/Main.lua"))()
 ```
 ## Customizable Settings for Aimbot
 ```lua
